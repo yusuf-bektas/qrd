@@ -1,0 +1,8 @@
+setup.py
+qrd/__init__.py
+qrd.egg-info/PKG-INFO
+qrd.egg-info/SOURCES.txt
+qrd.egg-info/dependency_links.txt
+qrd.egg-info/top_level.txt
+qrd/data/__init__.py
+qrd/data/utils.py
