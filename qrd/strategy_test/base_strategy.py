@@ -376,7 +376,7 @@ class MyStrategy(BaseStrategy):
             #deleting the orders that are not in best ask
             for order in self.get_all_orders('AKBNK','S'):
                 if order.price!=best_ask_px:
-                    self.delete_order('AKBNK',order.id)
+                    self.delete_order('AKBNK',order.id,'S')
 
         print(f"------{self.get_current_ts()}------")
         print(message)
