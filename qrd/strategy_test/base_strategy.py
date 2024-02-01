@@ -2,13 +2,14 @@ import pandas as  pd
 from abc import ABC, abstractmethod
 from collections import deque
 from sortedcontainers import SortedDict
-
+from qrd.data.utils import extract_messages
 from qrd.strategy_test.order_book import *
 
 class OrderRequest:
     def __init__(self, asset, ts):
         self.asset = asset
         self.ts = ts
+        self.latent_ts=ts+pd.Timedelta(nanoseconds=500)
 
 class AddRequest(OrderRequest):
     def __init__(self, asset, ts, side, price, quantity):
@@ -97,8 +98,8 @@ class BaseStrategy(ABC):
         else:
             return self.inventory[asset]
     
-    def get_orders_at_px(self, asset : str, side : str, price : float=None):
-        Q= self.orders_by_price[asset][side].get(price,[])
+    def get_orders_at_px(self, asset : str, side : str, price : float):
+        Q = self.orders_by_price[asset][side].get(price,[])
         list_of_orders=deque()
         for order_id in Q:
             list_of_orders.append(self.orders_by_id[asset][side][order_id])
@@ -113,7 +114,7 @@ class BaseStrategy(ABC):
         
     
     def __handle_requests__(self, asset):
-        while len(self.requestsQ[asset]) != 0 and self.requestsQ[asset][0].ts<=self.current_ts:
+        while len(self.requestsQ[asset]) != 0 and self.requestsQ[asset][0].latent_ts<=self.current_ts:
             request = self.requestsQ[asset].popleft()
             if isinstance(request, AddRequest):
                 self.__handle_add_request__(request)
@@ -126,7 +127,7 @@ class BaseStrategy(ABC):
 
     def __handle_add_request__(self, request : AddRequest):
         que_loc=self.get_book(request.asset).get_Q_size(request.side,request.price)
-        order=Order(request.ts, self.get_current_ts(),'A', request.side, request.price, request.quantity, self.id_counter, que_loc, request.asset)
+        order=Order(request.ts, request.latent_ts,'A', request.side, request.price, request.quantity, self.id_counter, que_loc, request.asset)
         self.id_counter+=1
         self.orders_by_id[request.asset][request.side][order.id]=order
         self.orders_by_price[request.asset][request.side].setdefault(request.price,deque()).append(order.id)
@@ -135,8 +136,8 @@ class BaseStrategy(ABC):
     def __handle_delete_request__(self, request : DeleteRequest):
         try:
             order=self.orders_by_id[request.asset][request.side][request.order_id]
-            del self.orders_by_id[request.asset][request.side][request.order_id]
             self.orders_by_price[request.asset][request.side][order.price].remove(request.order_id)
+            del self.orders_by_id[request.asset][request.side][request.order_id]
             self.on_transaction(order, 'D')
         except KeyError:
             print('Order not found. Probably already executed.')
@@ -188,7 +189,7 @@ class BaseStrategy(ABC):
             self.__handle_exec_message__(Q_loc,message)
         elif message.type=='O':#market event
             if message.flag in ['P_GUNSONU','P_ACS_EMR_TP_PY_EIY']:
-                self._reset_levels_()
+                self._reset_levels_(message)
             
         
     def __handle_delete_message__(self,Q_loc,message : Message):
@@ -225,8 +226,9 @@ class BaseStrategy(ABC):
                 for order in Q:
                     order.que_loc-=1
             else:#it means that our orders in the Q are in front of the order that is executed
-                qty_to_be_executed=min(our_order_in_front.qty,message.qty)
-                while our_order_in_front.que_loc==0 and qty_to_be_executed>0:
+                exec_qty=message.qty
+                qty_to_be_executed=min(our_order_in_front.qty,exec_qty)
+                while our_order_in_front.que_loc==0 and exec_qty>0:
                     #will call self.ontransaction
                     our_order_in_front.qty-=qty_to_be_executed
                     if message.side=='B':
@@ -238,15 +240,15 @@ class BaseStrategy(ABC):
                     self.on_transaction(our_order_in_front,'E',qty_to_be_executed)
                     if our_order_in_front.qty==0:
                         Q.popleft()
+                        self.orders_by_price[message.asset][message.side][message.price].remove(our_order_in_front.id)
                         del self.orders_by_id[message.asset][message.side][our_order_in_front.id]
-                    qty_to_be_executed-=our_order_in_front.qty
+                    exec_qty-=qty_to_be_executed
                     if len(Q)>0:
                         our_order_in_front=Q[0]
                     else:
                         break
         else:#it means that the order in the book is partially executed, I will adjust bthe sum qty
             pass
-
 
     def get_book(self, asset : str):
         """
@@ -337,3 +339,76 @@ class BaseStrategy(ABC):
         event_type: 'A', 'D' 'E' 'M' for add, delete, execute, market order(E-->execution of a limit order, M-->execution of a market order)
         """
         pass
+
+
+class MyStrategy(BaseStrategy):
+#    def __init__(self, data : pd.DataFrame, assets : list[str], cash : float, inventory : dict[str, float]):
+
+    def __init__(self, data, assets):
+        super().__init__(data, assets,cash=100000,inventory={'AKBNK':0})
+    
+    def on_update(self, message : Message):
+                
+        current_ts=self.get_current_ts()    
+        start_time = pd.Timestamp(current_ts.date()).replace(hour=10, minute=0, second=0)
+        end_time = pd.Timestamp(current_ts.date()).replace(hour=18, minute=0, second=0)
+
+        if current_ts<start_time or current_ts>end_time:
+            return
+        
+        for order in self.get_all_orders('AKBNK','S'):
+            if len(self.orders_by_price[order.asset][order.side][order.price])>1:
+                self.delete_order('AKBNK',order.id)
+
+        best_bid_px=self.get_book('AKBNK').get_best_bid()[0]
+        best_ask_px=self.get_book('AKBNK').get_best_ask()[0]
+        
+        if self.get_inventory('AKBNK')<=0 and best_bid_px!=None:
+            if len(self.get_orders_at_px('AKBNK','B',best_bid_px))==0:
+                self.add_order('AKBNK','B',best_bid_px,1)
+            #deleting the orders that are not in best bid
+            for order in self.get_all_orders('AKBNK','B'):
+                if order.price!=best_bid_px:
+                    self.delete_order('AKBNK',order.id,'B')
+        elif self.get_inventory('AKBNK')>0 and best_ask_px!=None:
+            if len(self.get_orders_at_px('AKBNK','S',best_ask_px))==0:
+                self.add_order('AKBNK','S',best_ask_px,1)
+            #deleting the orders that are not in best ask
+            for order in self.get_all_orders('AKBNK','S'):
+                if order.price!=best_ask_px:
+                    self.delete_order('AKBNK',order.id)
+
+        print(f"------{self.get_current_ts()}------")
+        print(message)
+        print(self.get_book('AKBNK').get_best_bid())
+        print(self.get_book('AKBNK').get_best_ask())
+        print(self.get_inventory('AKBNK'))
+        print(self.get_cash())
+        
+        for order in self.get_all_orders('AKBNK','B'):
+            print(order)
+        for order in self.get_all_orders('AKBNK','S'):
+            print(order)
+                        
+    def on_transaction(self, order: Order, event_type: str, exec_qty : int=None):
+        #print(order, "event: ", event_type)
+        pass
+
+
+if __name__ == '__main__':
+    from qrd.data.utils import *
+    import os
+
+    path=r"C:\Users\yusuf.bektas\Desktop\yusuf_workspace\data"
+    spot=read_spot(path,'AKBNK.csv')
+    msgs=extract_messages(spot.messages)
+    import pandas as pd
+
+    msgs['asset'] = "AKBNK"  
+    new_column_order = ['asset'] + [col for col in msgs.columns if col != 'asset']
+
+    msgs = msgs[new_column_order]
+    my_strategy=MyStrategy(msgs,['AKBNK'])
+    my_strategy.run()
+            
+            
