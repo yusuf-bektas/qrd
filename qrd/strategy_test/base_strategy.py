@@ -358,7 +358,7 @@ class MyStrategy(BaseStrategy):
         
         for order in self.get_all_orders('AKBNK','S'):
             if len(self.orders_by_price[order.asset][order.side][order.price])>1:
-                self.delete_order('AKBNK',order.id)
+                self.delete_order('AKBNK',order.id,'S')
 
         best_bid_px=self.get_book('AKBNK').get_best_bid()[0]
         best_ask_px=self.get_book('AKBNK').get_best_ask()[0]
