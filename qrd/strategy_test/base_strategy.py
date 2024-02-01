@@ -193,8 +193,8 @@ class BaseStrategy(ABC):
             
         
     def __handle_delete_message__(self,Q_loc,message : Message):
-        Q=self.get_orders_at_px(message.asset,message.side,message.price)
-        if Q is None:
+        Q=self.orders_by_price[message.asset][message.side].get(message.price)
+        if Q is None or len(Q)==0:
             return
         tempQ=deque()
         while len(Q)>0:
