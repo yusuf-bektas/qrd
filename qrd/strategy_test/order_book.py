@@ -23,8 +23,20 @@ class Message:
         """
         Create a Message object from a tuple.
         """
-        ts, msg_type, side, price, qty, order_id, flag = data_tuple
-        return cls(ts, msg_type, side, price, qty, order_id, flag)
+        # Unpack the tuple
+        ts, asset_name, msg_type, side, price, qty, order_id, flag = data_tuple
+        # Create and return the Message object, mapping 'asset_name' to the correct parameter
+        return cls(ts=ts, msg_type=msg_type, side=side, price=price, qty=qty, order_id=order_id, flag=flag, asset_name=asset_name)
+
+    def __str__(self):
+        """
+        Returns a string representation of the Message object.
+        """
+        return f"Message(Timestamp: {self.ts}, Type: {self.type}, Side: {self.side}, " \
+               f"Price: {self.price}, Quantity: {self.qty}, Order ID: {self.id}, Flag: {self.flag}, " \
+               f"BIST Time: {self.bist_time}, Asset: {self.asset})"
+
+
 
 class OrderBook:
     """
@@ -65,9 +77,11 @@ class OrderBook:
 
     def get_asset(self):
         return self.asset
+    
     def get_ts(self):
         return self.current_ts
-    def get_que_size(self,side,price):
+    
+    def get_Q_size(self,side,price):
         id_by_price = self.bid_ids_by_price if side == 'B' else self.ask_ids_by_price
         q=id_by_price.get(price,[])
         return len(q)
@@ -79,22 +93,25 @@ class OrderBook:
         self.bid_qty_by_price = SortedDict(OrderBook._return_neg)
         self.ask_qty_by_price = SortedDict()
 
-    def on_new_message(self, message : Message):
+    def on_new_message(self, message : Message) -> tuple:
         """
         Method to handle different types of messages and modify the order book accordingly.
-        returns a tuple consisting of the price level, updated order's queue location, the sum of the quantities 
-        at this price level up to the updated order.
+        returns a tuple consisting of updated order's queue location, and
+        the sum of the quantities at this price level up to the updated order
 
-        returns : (asset, price, sum_qty, q_loc, flag)
+        returns : (q_loc, order_type, side)
         """
+
+        if message.asset!=self.asset:
+            raise ValueError('The book and the message are not for the same asset.')
         self.current_ts=message.ts
-        res=None
+        q_loc=None#this is for the case where an oorder is deleted in a prce level and it is in front of our order.It is in format (sum_qty,q_loc)
         if message.type == 'A':
-            res = self.add_order(message)
+            self.add_order(message)
         elif message.type == 'D':
-            res = self.delete_order(message)
+            q_loc = self.delete_order(message)
         elif message.type == 'E':
-            res = self.execute_order(message)
+            q_loc=self.execute_order(message)
         else:#it is a message about an event in bist
             #self._reset_()
             if message.flag in ['P_GUNSONU','P_ACS_EMR_TP_PY_EIY']:
@@ -126,8 +143,7 @@ class OrderBook:
         ##############################
         """
 
-
-        return res
+        return q_loc
 
     
     def add_order(self, message):
@@ -149,7 +165,6 @@ class OrderBook:
         level_q.append(message.id)
         order_dict[message.id] = message
         qty_by_price[message.price] += message.qty
-        return self.asset, message.price,qty_by_price[message.price],len(level_q)-1,'A',message.side
         
     def delete_order(self, message):
         """
@@ -172,7 +187,7 @@ class OrderBook:
         index=0
         q_loc=0
         sum_qty_tmp=0
-        sum_qty=0
+        sum_qty=0#!I will use it later!
         tempQ=deque()
         while len(level_q)>0:
             next_id=level_q.popleft()
@@ -193,7 +208,7 @@ class OrderBook:
             del id_by_price[order.price]
             
         del order_dict[message.id]
-        return self.asset, message.price,sum_qty,q_loc,'D',message.side
+        return q_loc
 
     def execute_order(self, message):
         id_by_price = self.bid_ids_by_price if message.side == 'B' else self.ask_ids_by_price
@@ -208,15 +223,16 @@ class OrderBook:
         qty_by_price[order.price] -= message.qty
         level_q=id_by_price[order.price]
         order.qty-=message.qty
+        q_loc=None
         if order.qty==0:
             level_q.remove(message.id)
             del order_dict[message.id]
+            q_loc=0
         #if this was the last order at this price
         if qty_by_price[order.price]==0:
             del qty_by_price[order.price]
             del id_by_price[order.price]
-        
-        return self.asset, message.price,0,0,'E',message.side
+        return q_loc
 
     def _get_qty_by_price(self, side, price):
         """
