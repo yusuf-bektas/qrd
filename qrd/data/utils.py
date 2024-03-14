@@ -88,4 +88,8 @@ def extract_messages(messages_series : pd.Series):
     extracted_data['px'] = pd.to_numeric(extracted_data['px'], errors='coerce').fillna(0)
     extracted_data['qty'] = pd.to_numeric(extracted_data['qty'], errors='coerce').fillna(0)
     extracted_data['id'] = extracted_data['id'].fillna(0).astype(np.int64)
+
+    extracted_data.loc[(extracted_data.id.diff()==0) & (extracted_data.Type=='A') & (extracted_data.qty.diff()<0) & (extracted_data.px.diff()==0),'flag']='SIZE_REDUCTION'
+    extracted_data.loc[(extracted_data.id.diff(-1)==0) & (extracted_data.Type=='D') & (extracted_data.qty.diff(-1)>0) & (extracted_data.px.diff(-1)==0),'flag']='SIZE_REDUCTION'
+    extracted_data[extracted_data.flag=='SIZE_REDUCTION']
     return extracted_data.reset_index(level=1, drop=True)
