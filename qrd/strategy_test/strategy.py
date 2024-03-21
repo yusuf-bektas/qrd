@@ -2,7 +2,8 @@
 from sortedcontainers import SortedDict
 import pandas as pd 
 import qrd.data.utils as utils
-
+import numpy as np
+import matplotlib.pyplot as plt
 class Order:
     def __init__(self,type,order_id,price,quantity,side,flag,enter_ts):
         self.type=type
@@ -34,14 +35,16 @@ class Strategy:
         self.orders_on_way=[]
         self.commission=commission
         self.prev_row=None
+        self.prevMold=None
 
     def add_data(self,data : pd.DataFrame, messages : pd.DataFrame=None):
         if type(data.index)!=pd.core.indexes.datetimes.DatetimeIndex:
             raise ValueError('index must be datetime')
-        if 'messages' not in data.columns:
-            #maybe more checks later
-            raise ValueError('messages column not found')
+        self.row_data=data
         if messages is None:
+            if 'messages' not in data.columns:
+            #maybe more checks later
+                raise ValueError('messages column not found')
             msgs=utils.extract_messages(data['messages'])
         else:
             msgs=messages
@@ -220,6 +223,8 @@ class Strategy:
                 self.delete_order(order.order_id,order.price,order.quantity,order.side)
     
     def run(self,data=None):
+        if data is not None:
+            self.add_data(data)
         if self.data is None:
             raise ValueError('data is not set, use add_data method to set the data first')
         prev_ts=None
@@ -350,15 +355,53 @@ class Strategy:
                             self.offers[order.price]=[order]
                 
                 self.on_mold_update(row)
+                #sıraya dikkat!!!
+                self.prevMold=row
 
             prev_ts=row.ts
             self.prev_row=row
+        if len(self.ouch)==0:
+            raise ValueError('no ouch message is generated, check the data or strategy')
         self.ouch=pd.DataFrame(self.ouch).set_index('ts',drop=True)
         return self.ouch
+    
+    def get_results(self, plot=False,additional_columns=[]):
+        """
+        calculate inventory value and PnL, some additional columns can be added to the results to check the strategy.
+        There will be other metrics to be added later.
+        """
+        data=self.row_data
+        ouch=self.ouch
+        default_cols=['askpx', 'bidpx', 'askqty','bidqty','teo', 'messages']
+        combined = ouch.join(data[list(set(default_cols+additional_columns))], how='outer')
+        
+        # Forward-fill missing values for specified columns
+        combined['inventory'] = combined['inventory'].fillna(method='ffill')
+        combined['cash'] = combined['cash'].fillna(method='ffill')
+        combined['askpx'] = combined['askpx'].fillna(method='ffill')
+        combined['bidpx'] = combined['bidpx'].fillna(method='ffill')
+        combined['teo'] = combined['teo'].fillna(method='ffill')
+        combined['askqty'] = combined['askqty'].fillna(method='ffill')
+        combined['bidqty'] = combined['bidqty'].fillna(method='ffill')
+        combined['messages'] = combined['messages'].fillna(method='ffill')
+        # Calculate inventory value and PnL
+        combined['inv_value'] = combined['inventory'] * np.where(combined['inventory'] > 0, combined['bidpx'], combined['askpx'])
+        combined['pnl'] = combined['cash'] + combined['inv_value']
+        combined['pnl_diff'] = combined['pnl'].diff().fillna(0)
+        
+        # If plotting is requested, plot the PnL
+        if plot:
+            combined.reset_index(drop=True)['pnl'].plot(title='PnL Over Time')
+            plt.xlabel('Time')
+            plt.ylabel('PnL')
+            plt.show()
+        
+        # Return the combined DataFrame with calculations
+        return combined
         
 
 #from qrd.strategy_test.strategy import Strategy
-class TeoStrategy(Strategy):
+class TeoStrategyExample(Strategy):
 
     def __init__(self,inventory_limit=10,default_lots=1,sent_latency=pd.Timedelta(0,unit='ns'),ticksize=250,
                  closing_time=pd.Timestamp('17:58:00').time(),opening_time=pd.Timestamp('10:00:00').time(),time_diff=pd.Timedelta(20,unit='s'),
@@ -451,34 +494,6 @@ class TeoStrategy(Strategy):
                 elif self.inventory<0:
                     self.add_order('A','B',row.askpx,-self.inventory)
 
+        
 
-import pandas as pd
-import numpy as np
-import matplotlib.pyplot as plt
-
-def calc_results(data, ouch, plot=False):
-    # Join the 'ouch' DataFrame with specified columns from 'data'
-    combined = ouch.join(data[['askpx', 'bidpx', 'teo']], how='outer')
-    
-    # Forward-fill missing values for specified columns
-    combined['inventory'] = combined['inventory'].fillna(method='ffill')
-    combined['cash'] = combined['cash'].fillna(method='ffill')
-    combined['askpx'] = combined['askpx'].fillna(method='ffill')
-    combined['bidpx'] = combined['bidpx'].fillna(method='ffill')
-    combined['teo'] = combined['teo'].fillna(method='ffill')
-    
-    # Calculate inventory value and PnL
-    combined['inv_value'] = combined['inventory'] * np.where(combined['inventory'] > 0, combined['bidpx'], combined['askpx'])
-    combined['pnl'] = combined['cash'] + combined['inv_value']
-    combined['pnl_diff'] = combined['pnl'].diff().fillna(0)
-    
-    # If plotting is requested, plot the PnL
-    if plot:
-        combined.reset_index(drop=True)['pnl'].plot(title='PnL Over Time')
-        plt.xlabel('Time')
-        plt.ylabel('PnL')
-        plt.show()
-    
-    # Return the combined DataFrame with calculations
-    return combined
 
