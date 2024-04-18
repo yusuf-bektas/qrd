@@ -36,6 +36,36 @@ class Strategy:
         self.commission=commission
         self.prev_row=None
         self.prevMold=None
+    
+    def get_inventory(self):
+        return self.inventory
+
+    def get_bid_qty(self,px):
+        return self.bidqty_by_px.get(px,0)
+    
+    def get_ask_qty(self,px):
+        return self.askqty_by_px.get(px,0)
+    
+    def get_price_step(self,price):
+        if price<20*1000:
+            fiyat_adimi = 0.01*1000
+        elif price<50*1000:
+            fiyat_adimi = 0.02*1000
+        elif price<100*1000:
+            fiyat_adimi = 0.05*1000
+        elif price<250*1000:
+            fiyat_adimi = 0.10*1000
+        elif price<500*1000:
+            fiyat_adimi = 0.25*1000
+        elif price<1000*1000:
+            fiyat_adimi = 0.50*1000         
+        elif price<2500*1000:
+            fiyat_adimi = 1*1000             
+        else:
+            fiyat_adimi = 2.5*1000
+        return fiyat_adimi
+
+    
 
     def add_data(self,data : pd.DataFrame, messages : pd.DataFrame=None):
         if type(data.index)!=pd.core.indexes.datetimes.DatetimeIndex:
@@ -48,7 +78,7 @@ class Strategy:
             msgs=utils.extract_messages(data['messages'])
         else:
             msgs=messages
-        self.data=msgs.join(data)
+        self.data=msgs.join(data,how='outer')
         if "messages" in self.data.columns:
             self.data=self.data.drop(columns=['messages'])
         self.data['ts']=self.data.index
@@ -56,7 +86,17 @@ class Strategy:
 
     #this will be overrided by the user
     def on_mold_update(self,row):
+        """
+        This function will be called when the mold is updated.
+        """
         raise NotImplementedError('on_mold_update must be implemented')
+
+    #this will be overrided by the user
+    def on_trade(self,order,event):
+        """
+        This function will be called when an order is executed or accepted.
+        """
+        pass
     
     def check_buy_execution(self,row):            
         qty_to_be_executed=row.qty
@@ -87,6 +127,8 @@ class Strategy:
                     'cash':self.cash,
                 }
                 self.ouch.append(ouch_msg)
+                #calling on_trade
+                self.on_trade(order,'execution')
                 
             if len(self.bids[best_bid_px])==0:
                 self.bids.pop(best_bid_px)
@@ -120,6 +162,8 @@ class Strategy:
                     'inventory':self.inventory
                 }    
                 self.ouch.append(ouch_msg)
+                #calling on_trade
+                self.on_trade(order,'execution')
         
             if len(self.offers[best_offer_px])==0:
                 self.offers.pop(best_offer_px)   
@@ -264,6 +308,8 @@ class Strategy:
                         'inventory':self.inventory
                     }
                     self.ouch.append(ouch_msg)
+                    #calling on_trade
+                    self.on_trade(order,'accept_order')
                     
                     #handling deletions first
                     if order.type=='D':
@@ -320,6 +366,8 @@ class Strategy:
                                 'inventory':self.inventory
                             }
                             self.ouch.append(ouch_msg)
+                            #calling on_trade
+                            self.on_trade(order,'execution')
                         elif order.price in self.bids:
                             self.bids[order.price].append(order)
                         else:
@@ -349,6 +397,8 @@ class Strategy:
                                 'inventory':self.inventory
                             }
                             self.ouch.append(ouch_msg)
+                            #calling on_trade
+                            self.on_trade(order,'execution')
                         elif order.price in self.offers:
                             self.offers[order.price].append(order)
                         else:
