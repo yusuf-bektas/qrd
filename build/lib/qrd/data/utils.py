@@ -7,7 +7,7 @@ import os
 This file contains utility functions for the project.
 """
 
-def read_data(path, file_name, px_type=np.uint32, qty_type=np.uint32, vol_type=np.uint32):
+def read_data(path, file_name, px_type=np.int64, qty_type=np.int64, vol_type=np.int64):
     df=pd.read_csv(os.path.join(path,file_name),index_col=0)
     df.index=pd.to_datetime(df.index)
     df=df.drop(columns=[col for col in df.columns if "unnamed" in col.lower()])
@@ -57,49 +57,41 @@ def filter_dates(dt_index, df):
     # Return the filtered DataFrame without the additional columns
     return filtered_df.drop(columns=['Date', 'min', 'max'])
 
+def extract_messages(messages_series : pd.Series):
+    """
+    Extracts data from messages using an enhanced regex pattern.
 
-def parse_messages(series: pd.Series):
-    """
-    This function assumes that the input series contains messages in the format and indexed by time
-    """
-    # Initialize dictionary with lists for each key
-    parsed_data = {
-        "date":[],
-        "Type": [],
-        "Direction": [],
-        "px": [],
-        "qty": [],
-        "id": [],
-        "flag": []
-    }
-    for date_time, messages in series.items():
-        segments = messages.strip().split(') ')
-        # Parse each segment and add to the dictionary
-        for segment in segments:
-            parts = segment.replace('(', '').replace(')', '').split('; ')
-            # Determine if the segment type is 'O'
-            if parts[0] == 'O':
-                type_ = 'O'
-                direction = 'DNE'
-                px = np.uint32(0)
-                qty = np.uint32(0)
-                id_ = np.uint64(0)
-                flag = parts[1].strip()
-            else:
-                # Parse other types (A, E, D)
-                type_ = parts[0].split('-')[0]  # Type
-                direction = parts[0].split('-')[1]  # Direction
-                px = np.uint32(parts[1])  # px
-                qty = np.uint32(parts[2])  # qty
-                id_ = np.uint64(parts[3])  # id
-                flag = 'NONE'  # flag (default)
-            parsed_data["date"].append(date_time)
-            parsed_data["Type"].append(type_)
-            parsed_data["Direction"].append(direction)
-            parsed_data["px"].append(px)
-            parsed_data["qty"].append(qty)
-            parsed_data["id"].append(id_)
-            parsed_data["flag"].append(flag)
-    return pd.DataFrame(parsed_data)    
+    messages_df: DataFrame containing the messages.
+    date_column: Name of the column containing date values.
+    message_column: Name of the column containing message strings.
+    date_value: Specific date value to filter messages on.
     
+    returns: DataFrame with extracted message components.
+    """
 
+    pattern = r"""
+        (?P<Type>[A-Z])-(?P<Direction>[BS]);\s*  # Captures Type and Direction with a dash in between
+        (?P<px>\d+);\s*                          # Captures px
+        (?P<qty>\d+);\s*                         # Captures qty
+        (?P<id>\d+)                              # Captures id directly without a following semicolon
+        |                                        # 
+        (?P<Type_O>[A-Z]);\s*                    # Captures Type_O for messages without Direction
+        (?P<flag>[^)]+)                          # Captures flag for Type_O messages
+    """
+    extracted_data = messages_series.str.extractall(pattern, flags=re.VERBOSE)
+
+    # Post-processing to clean and format extracted data
+    extracted_data['Type'] = extracted_data['Type'].fillna(extracted_data['Type_O'])
+    extracted_data.drop(columns=['Type_O'], inplace=True)
+    extracted_data['Direction'] = extracted_data['Direction'].fillna('DNE')
+    extracted_data['flag'] = extracted_data['flag'].fillna('NONE')
+    extracted_data['px'] = pd.to_numeric(extracted_data['px'], errors='coerce').fillna(0)
+    extracted_data['qty'] = pd.to_numeric(extracted_data['qty'], errors='coerce').fillna(0)
+    extracted_data['id'] = extracted_data['id'].fillna(0).astype(np.int64)
+
+    extracted_data.loc[(extracted_data.id.diff()==0) & (extracted_data.Type=='A') & (extracted_data.qty.diff()<0) & (extracted_data.px.diff()==0),'flag']='SIZE_REDUCTION'
+    extracted_data.loc[(extracted_data.id.diff(-1)==0) & (extracted_data.Type=='D') & (extracted_data.qty.diff(-1)>0) & (extracted_data.px.diff(-1)==0),'flag']='SIZE_REDUCTION'
+    extracted_data[extracted_data.flag=='SIZE_REDUCTION']
+    extracted_data=extracted_data.reset_index(level=1, drop=True)
+    extracted_data['flag']=extracted_data.flag.str.strip()
+    return extracted_data

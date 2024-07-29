@@ -6,3 +6,6 @@ qrd.egg-info/dependency_links.txt
 qrd.egg-info/top_level.txt
 qrd/data/__init__.py
 qrd/data/utils.py
+qrd/strategy_test/__init__.py
+qrd/strategy_test/multiasset_strategy.py
+qrd/strategy_test/strategy.py

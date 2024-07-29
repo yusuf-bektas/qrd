@@ -7,7 +7,7 @@ import os
 This file contains utility functions for the project.
 """
 
-def read_data(path, file_name, px_type=np.int32, qty_type=np.int32, vol_type=np.int32):
+def read_data(path, file_name, px_type=np.int64, qty_type=np.int64, vol_type=np.int64):
     df=pd.read_csv(os.path.join(path,file_name),index_col=0)
     df.index=pd.to_datetime(df.index)
     df=df.drop(columns=[col for col in df.columns if "unnamed" in col.lower()])
@@ -92,4 +92,6 @@ def extract_messages(messages_series : pd.Series):
     extracted_data.loc[(extracted_data.id.diff()==0) & (extracted_data.Type=='A') & (extracted_data.qty.diff()<0) & (extracted_data.px.diff()==0),'flag']='SIZE_REDUCTION'
     extracted_data.loc[(extracted_data.id.diff(-1)==0) & (extracted_data.Type=='D') & (extracted_data.qty.diff(-1)>0) & (extracted_data.px.diff(-1)==0),'flag']='SIZE_REDUCTION'
     extracted_data[extracted_data.flag=='SIZE_REDUCTION']
-    return extracted_data.reset_index(level=1, drop=True)
+    extracted_data=extracted_data.reset_index(level=1, drop=True)
+    extracted_data['flag']=extracted_data.flag.str.strip()
+    return extracted_data
