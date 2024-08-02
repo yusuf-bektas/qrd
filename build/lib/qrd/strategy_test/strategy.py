@@ -238,12 +238,12 @@ class Strategy:
             raise ValueError('quantity must be positive')
         if side=='B':
             if price>self.current_row.askpx:
+                print(f'{self.current_row.ts}  buy orders price({price}) is higher than ask price({self.current_row.askpx}), setting price to ask price')
                 price=self.current_row.askpx
-                print('price is higher than ask price, setting price to ask price')
         if side=='S':
             if price<self.current_row.bidpx:
+                print(f'{self.current_row.ts}  sell orders price({price}) is lower than bid price({self.current_row.bidpx}), setting price to bid price')
                 price=self.current_row.bidpx
-                print('price is lower than bid price, setting price to bid price')
         ouch_msg={
             'event':'enter_order',
             'ts':self.current_row.ts,
