@@ -113,7 +113,7 @@ class Strategy:
             qty_to_be_executed-=exec_qty
             if order.qty_in_front<=0:
                 exec_qty=min(-order.qty_in_front,order.quantity)
-                exec_px=min(row.px,order.price)
+                exec_px=max(row.px,order.price)
                 if exec_qty>0:
                     order.quantity-=exec_qty
                     qty_to_be_executed-=exec_qty
@@ -150,7 +150,7 @@ class Strategy:
             qty_to_be_executed-=exec_qty
             if order.qty_in_front<=0:
                 exec_qty=min(-order.qty_in_front,order.quantity)
-                exec_px=max(row.px,order.price)
+                exec_px=min(row.px,order.price)
                 if exec_qty>0:
                     order.quantity-=exec_qty
                     qty_to_be_executed-=exec_qty
@@ -234,6 +234,16 @@ class Strategy:
         order=Order(type,self.id_counter,price,quantity,side,'N',self.current_row.ts)
         self.id_counter+=1
         self.orders_on_way.append(order)
+        if quantity<=0:
+            raise ValueError('quantity must be positive')
+        if side=='B':
+            if price>self.current_row.askpx:
+                price=self.current_row.askpx
+                print('price is higher than ask price, setting price to ask price')
+        if side=='S':
+            if price<self.current_row.bidpx:
+                price=self.current_row.bidpx
+                print('price is lower than bid price, setting price to bid price')
         ouch_msg={
             'event':'enter_order',
             'ts':self.current_row.ts,
